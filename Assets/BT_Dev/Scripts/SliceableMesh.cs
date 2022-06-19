@@ -2,18 +2,23 @@ using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 
-[RequireComponent(typeof(MeshFilter))]
+[RequireComponent(typeof(MeshFilter),typeof(MeshRenderer))]
 public class SliceableMesh : MonoBehaviour
 {
-    public Material CutplaneMaterial;
+    [SerializeField]
+    private Color CutplaneColor;
+    [SerializeField]
+    private int Slicelimit = 5;
     private MeshFilter meshF;
+
+    private int slicecount = 0;
 
     private void Awake()
     {
         meshF = GetComponent<MeshFilter>();
     }
 
-    private enum TrisCond { Error, Down, ItscUp,ItscDown,Up }
+    //private enum TrisCond { Error, Down, ItscUp,ItscDown,Up }
 
     bool breaksig = false;
 
@@ -526,10 +531,24 @@ public class SliceableMesh : MonoBehaviour
 
     public void Slice(Vector3 sliceIn, Vector3 sliceOut, Vector3 SwordOrigin)
     {
-        Plane pl = new Plane(sliceIn,sliceOut,SwordOrigin);
+        if (slicecount >= Slicelimit) return;
+        else slicecount++;
+
+        Debug.Log("mesh uv count : " + meshF.mesh.uv.Length);
+        Debug.Log("mesh vert count : " + meshF.mesh.vertices.Length);
+
+        Plane pl = new Plane();
+        pl.Set3Points(transform.worldToLocalMatrix.MultiplyPoint3x4(sliceIn),transform.worldToLocalMatrix.MultiplyPoint3x4(sliceOut), transform.worldToLocalMatrix.MultiplyPoint3x4(SwordOrigin));
         Mesh m = meshF.mesh;
         int[] triangles = m.triangles;
         Vector3[] verts = m.vertices;
+
+        Vector2[] meshUvs = meshF.mesh.uv;
+
+        Vector3 scale = transform.lossyScale;
+
+        Vector3 pos = transform.position;
+        Quaternion rot = transform.rotation;
 
         List<Vector3> intersections = new List<Vector3>();
         List<Triangle> newTris1 = new List<Triangle>();
@@ -543,9 +562,9 @@ public class SliceableMesh : MonoBehaviour
             int v1 = triangles[i];
             int v2 = triangles[i + 1];
             int v3 = triangles[i + 2];
-            Vector3 p1 = transform.TransformPoint(verts[v1]);
-            Vector3 p2 = transform.TransformPoint(verts[v2]);
-            Vector3 p3 = transform.TransformPoint(verts[v3]);
+            Vector3 p1 = verts[v1];
+            Vector3 p2 = verts[v2];
+            Vector3 p3 = verts[v3];
             Vector3 norm = Vector3.Cross(p1 - p2, p1 - p3);
 
             Vector3 dir = p2 - p1;
@@ -579,10 +598,8 @@ public class SliceableMesh : MonoBehaviour
                 Debug.Assert(points.Count == 2);
                 List<Vector3> points1 = new List<Vector3>();
                 List<Vector3> points2 = new List<Vector3>();
-                // Intersection verts
                 points1.AddRange(points);
                 points2.AddRange(points);
-                // Check which side the original vert was
                 if (pl.GetSide(p1))
                 {
                     points1.Add(p1);
@@ -622,6 +639,7 @@ public class SliceableMesh : MonoBehaviour
                         Triangle tri = new Triangle() { v1 = points1[0], v2 = points1[2], v3 = points1[3] };
                         tri.matchDirection(norm);
                         newTris1.Add(tri);
+
                         tri = new Triangle() { v1 = points1[0], v2 = points1[3], v3 = points1[1] };
                         tri.matchDirection(norm);
                         newTris1.Add(tri);
@@ -681,13 +699,14 @@ public class SliceableMesh : MonoBehaviour
 
         if (intersections.Count > 1)
         {
-            // Sets center
             Vector3 center = Vector3.zero;
             foreach (Vector3 vec in intersections)
             {
                 center += vec;
             }
             center /= intersections.Count;
+
+
             for (int i = 0; i < intersections.Count; i++)
             {
                 Triangle tri = new Triangle() { v1 = intersections[i], v2 = center, v3 = i + 1 == intersections.Count ? intersections[i] : intersections[i + 1] };
@@ -746,39 +765,35 @@ public class SliceableMesh : MonoBehaviour
             mesh2.RecalculateNormals();
             mesh2.RecalculateBounds();
 
-            // Create new objects
 
             GameObject goNew = Instantiate(gameObject,transform.position,Quaternion.identity);
 
-            transform.position = Vector3.zero;
+            transform.position = pos;
             meshF.mesh = mesh1;
             GetComponent<MeshCollider>().sharedMesh = mesh1;
+            GetComponent<MeshRenderer>().materials[1].color = CutplaneColor;
 
-            goNew.transform.position = Vector3.zero;
+            goNew.transform.position = pos;
+            goNew.transform.rotation = rot;
             goNew.GetComponent<MeshFilter>().mesh = mesh2;
             goNew.GetComponent<MeshCollider>().sharedMesh = mesh2;
-
+            goNew.GetComponent<MeshRenderer>().materials[1].color = CutplaneColor;
         }
     }
 
-    private void FixedUpdate()
-    {
-        if (breaksig) Debug.Break();
-    }
+    //private TrisCond TrisIntersectCondition(Vector3[] tri, Plane plane)
+    //{
+    //    int upCount = 0;
+    //    if (plane.GetSide(tri[0])) upCount++;
+    //    if (plane.GetSide(tri[1])) upCount++;
+    //    if (plane.GetSide(tri[2])) upCount++;
 
-    private TrisCond TrisIntersectCondition(Vector3[] tri, Plane plane)
-    {
-        int upCount = 0;
-        if (plane.GetSide(tri[0])) upCount++;
-        if (plane.GetSide(tri[1])) upCount++;
-        if (plane.GetSide(tri[2])) upCount++;
-
-        if (upCount == 3) return TrisCond.Up;
-        else if (upCount == 2) return TrisCond.ItscDown;
-        else if (upCount == 1) return TrisCond.ItscUp;
-        else if (upCount == 0) return TrisCond.Down;
-        else return TrisCond.Error;
-    }
+    //    if (upCount == 3) return TrisCond.Up;
+    //    else if (upCount == 2) return TrisCond.ItscDown;
+    //    else if (upCount == 1) return TrisCond.ItscUp;
+    //    else if (upCount == 0) return TrisCond.Down;
+    //    else return TrisCond.Error;
+    //}
 
     private Vector3 GetIntsectionVecToPlane(Vector3 a, Vector3 b, Vector3 planePoint, Vector3 planeNormal)
     {
