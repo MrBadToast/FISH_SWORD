@@ -508,6 +508,10 @@ public class SliceableMesh : MonoBehaviour
         public Vector3 v2;
         public Vector3 v3;
 
+        public Vector2 uv1;
+        public Vector2 uv2;
+        public Vector2 uv3;
+
         public Vector3 getNormal()
         {
             return Vector3.Cross(v1 - v2, v1 - v3).normalized;
@@ -523,8 +527,11 @@ public class SliceableMesh : MonoBehaviour
             else
             {
                 Vector3 vec = v1;
+                Vector2 u = uv1;
                 v1 = v3;
+               uv1 = uv3;
                 v3 = vec;
+               uv3 = u;
             }
         }
     }
@@ -534,16 +541,15 @@ public class SliceableMesh : MonoBehaviour
         if (slicecount >= Slicelimit) return;
         else slicecount++;
 
-        Debug.Log("mesh uv count : " + meshF.mesh.uv.Length);
-        Debug.Log("mesh vert count : " + meshF.mesh.vertices.Length);
+        Debug.Log("pre mesh uv count : " + meshF.mesh.uv.Length);
+        Debug.Log("pre mesh vert count : " + meshF.mesh.vertices.Length);
 
         Plane pl = new Plane();
         pl.Set3Points(transform.worldToLocalMatrix.MultiplyPoint3x4(sliceIn),transform.worldToLocalMatrix.MultiplyPoint3x4(sliceOut), transform.worldToLocalMatrix.MultiplyPoint3x4(SwordOrigin));
         Mesh m = meshF.mesh;
         int[] triangles = m.triangles;
         Vector3[] verts = m.vertices;
-
-        Vector2[] meshUvs = meshF.mesh.uv;
+        Vector2[] meshUvs = meshF.sharedMesh.uv;
 
         Vector3 scale = transform.lossyScale;
 
@@ -551,6 +557,7 @@ public class SliceableMesh : MonoBehaviour
         Quaternion rot = transform.rotation;
 
         List<Vector3> intersections = new List<Vector3>();
+        List<Vector2> itscUvs = new List<Vector2>();
         List<Triangle> newTris1 = new List<Triangle>();
         List<Triangle> newTris2 = new List<Triangle>();
 
@@ -558,6 +565,7 @@ public class SliceableMesh : MonoBehaviour
         for (int i = 0; i < triangles.Length; i += 3)
         {
             List<Vector3> points = new List<Vector3>();
+            List<Vector2> current_uvs = new List<Vector2>();
 
             int v1 = triangles[i];
             int v2 = triangles[i + 1];
@@ -565,6 +573,9 @@ public class SliceableMesh : MonoBehaviour
             Vector3 p1 = verts[v1];
             Vector3 p2 = verts[v2];
             Vector3 p3 = verts[v3];
+            Vector2 u1 = meshUvs[v1];
+            Vector2 u2 = meshUvs[v2];
+            Vector2 u3 = meshUvs[v3];
             Vector3 norm = Vector3.Cross(p1 - p2, p1 - p3);
 
             Vector3 dir = p2 - p1;
@@ -576,6 +587,9 @@ public class SliceableMesh : MonoBehaviour
                 Vector3 intersection = p1 + ent * dir.normalized;
                 intersections.Add(intersection);
                 points.Add(intersection);
+                var iu = GetItscPointUV(u1, u2, p1, p2, intersection);
+                itscUvs.Add(iu);
+                current_uvs.Add(iu);
             }
             dir = p3 - p2;
             if (pl.Raycast(new Ray(p2, dir), out ent) && ent <= dir.magnitude)
@@ -583,6 +597,9 @@ public class SliceableMesh : MonoBehaviour
                 Vector3 intersection = p2 + ent * dir.normalized;
                 intersections.Add(intersection);
                 points.Add(intersection);
+                var iu = GetItscPointUV(u2, u3, p2, p3, intersection);
+                itscUvs.Add(iu);
+                current_uvs.Add(iu);
             }
             dir = p3 - p1;
             if (pl.Raycast(new Ray(p1, dir), out ent) && ent <= dir.magnitude)
@@ -590,6 +607,9 @@ public class SliceableMesh : MonoBehaviour
                 Vector3 intersection = p1 + ent * dir.normalized;
                 intersections.Add(intersection);
                 points.Add(intersection);
+                var iu = GetItscPointUV(u1, u3, p1, p3, intersection);
+                itscUvs.Add(iu);
+                current_uvs.Add(iu);
             }
 
             // Group tris and create new tris
@@ -598,36 +618,46 @@ public class SliceableMesh : MonoBehaviour
                 Debug.Assert(points.Count == 2);
                 List<Vector3> points1 = new List<Vector3>();
                 List<Vector3> points2 = new List<Vector3>();
+                List<Vector2> uvs1 = new List<Vector2>();
+                List<Vector2> uvs2 = new List<Vector2>();
                 points1.AddRange(points);
                 points2.AddRange(points);
+                uvs1.AddRange(current_uvs);
+                uvs2.AddRange(current_uvs);
                 if (pl.GetSide(p1))
                 {
                     points1.Add(p1);
+                    uvs1.Add(u1);
                 }
                 else
                 {
                     points2.Add(p1);
+                    uvs2.Add(u1);
                 }
                 if (pl.GetSide(p2))
                 {
                     points1.Add(p2);
+                    uvs1.Add(u2);
                 }
                 else
                 {
                     points2.Add(p2);
+                    uvs2.Add(u2);
                 }
                 if (pl.GetSide(p3))
                 {
                     points1.Add(p3);
+                    uvs1.Add(u3);
                 }
                 else
                 {
                     points2.Add(p3);
+                    uvs2.Add(u3);
                 }
 
                 if (points1.Count == 3)
                 {
-                    Triangle tri = new Triangle() { v1 = points1[1], v2 = points1[0], v3 = points1[2] };
+                    Triangle tri = new Triangle() { v1 = points1[1], v2 = points1[0], v3 = points1[2], uv1 = uvs1[1], uv2 = uvs1[0], uv3 = uvs1[2] };
                     tri.matchDirection(norm);
                     newTris1.Add(tri);
                 }
@@ -636,20 +666,21 @@ public class SliceableMesh : MonoBehaviour
                     Debug.Assert(points1.Count == 4);
                     if (Vector3.Dot((points1[0] - points1[1]), points1[2] - points1[3]) >= 0)
                     {
-                        Triangle tri = new Triangle() { v1 = points1[0], v2 = points1[2], v3 = points1[3] };
+                        Triangle tri = new Triangle() { v1 = points1[0], v2 = points1[2], v3 = points1[3], uv1 = uvs1[0], uv2 = uvs1[2], uv3 =uvs1[3] };
                         tri.matchDirection(norm);
                         newTris1.Add(tri);
 
-                        tri = new Triangle() { v1 = points1[0], v2 = points1[3], v3 = points1[1] };
+                        tri = new Triangle() { v1 = points1[0], v2 = points1[3], v3 = points1[1], uv1 = uvs1[0], uv2 = uvs1[3], uv3 = uvs1[1] };
                         tri.matchDirection(norm);
                         newTris1.Add(tri);
                     }
                     else
                     {
-                        Triangle tri = new Triangle() { v1 = points1[0], v2 = points1[3], v3 = points1[2] };
+                        Triangle tri = new Triangle() { v1 = points1[0], v2 = points1[3], v3 = points1[2], uv1 = uvs1[0], uv2 = uvs1[3], uv3 = uvs1[2] };
                         tri.matchDirection(norm);
                         newTris1.Add(tri);
-                        tri = new Triangle() { v1 = points1[0], v2 = points1[2], v3 = points1[1] };
+
+                        tri = new Triangle() { v1 = points1[0], v2 = points1[2], v3 = points1[1], uv1 = uvs1[0], uv2 = uvs1[2], uv3 = uvs1[1] };
                         tri.matchDirection(norm);
                         newTris1.Add(tri);
                     }
@@ -657,7 +688,7 @@ public class SliceableMesh : MonoBehaviour
 
                 if (points2.Count == 3)
                 {
-                    Triangle tri = new Triangle() { v1 = points2[1], v2 = points2[0], v3 = points2[2] };
+                    Triangle tri = new Triangle() { v1 = points2[1], v2 = points2[0], v3 = points2[2], uv1 = uvs2[1], uv2 = uvs2[0], uv3 = uvs2[2] };
                     tri.matchDirection(norm);
                     newTris2.Add(tri);
                 }
@@ -666,19 +697,21 @@ public class SliceableMesh : MonoBehaviour
                     Debug.Assert(points2.Count == 4);
                     if (Vector3.Dot((points2[0] - points2[1]), points2[2] - points2[3]) >= 0)
                     {
-                        Triangle tri = new Triangle() { v1 = points2[0], v2 = points2[2], v3 = points2[3] };
+                        Triangle tri = new Triangle() { v1 = points2[0], v2 = points2[2], v3 = points2[3], uv1 = uvs2[0], uv2 = uvs2[2], uv3 = uvs2[3] };
                         tri.matchDirection(norm);
                         newTris2.Add(tri);
-                        tri = new Triangle() { v1 = points2[0], v2 = points2[3], v3 = points2[1] };
+
+                        tri = new Triangle() { v1 = points2[0], v2 = points2[3], v3 = points2[1], uv1 = uvs2[0], uv2 = uvs2[3], uv3 = uvs2[1] };
                         tri.matchDirection(norm);
                         newTris2.Add(tri);
                     }
                     else
                     {
-                        Triangle tri = new Triangle() { v1 = points2[0], v2 = points2[3], v3 = points2[2] };
+                        Triangle tri = new Triangle() { v1 = points2[0], v2 = points2[3], v3 = points2[2], uv1 = uvs2[0], uv2 = uvs2[3], uv3 = uvs2[2] };
                         tri.matchDirection(norm);
                         newTris2.Add(tri);
-                        tri = new Triangle() { v1 = points2[0], v2 = points2[2], v3 = points2[1] };
+
+                        tri = new Triangle() { v1 = points2[0], v2 = points2[2], v3 = points2[1], uv1 = uvs2[0], uv2 = uvs2[2], uv3 = uvs2[1] };
                         tri.matchDirection(norm);
                         newTris2.Add(tri);
                     }
@@ -688,11 +721,11 @@ public class SliceableMesh : MonoBehaviour
             {
                 if (pl.GetSide(p1))
                 {
-                    newTris1.Add(new Triangle() { v1 = p1, v2 = p2, v3 = p3 });
+                    newTris1.Add(new Triangle() { v1 = p1, v2 = p2, v3 = p3 ,uv1 = u1, uv2 = u2, uv3 = u3 });
                 }
                 else
                 {
-                    newTris2.Add(new Triangle() { v1 = p1, v2 = p2, v3 = p3 });
+                    newTris2.Add(new Triangle() { v1 = p1, v2 = p2, v3 = p3, uv1 = u1, uv2 = u2, uv3 = u3 });
                 }
             }
         }
@@ -730,6 +763,7 @@ public class SliceableMesh : MonoBehaviour
             Mesh mesh2 = new Mesh();
 
             List<Vector3> tris = new List<Vector3>();
+            List<Vector2> SurfaceUvs = new List<Vector2>();
             List<int> indices = new List<int>();
 
             int index = 0;
@@ -738,27 +772,37 @@ public class SliceableMesh : MonoBehaviour
                 tris.Add(thing.v1);
                 tris.Add(thing.v2);
                 tris.Add(thing.v3);
+                SurfaceUvs.Add(thing.uv1);
+                SurfaceUvs.Add(thing.uv2);
+                SurfaceUvs.Add(thing.uv3);
                 indices.Add(index++);
                 indices.Add(index++);
                 indices.Add(index++);
             }
             mesh1.vertices = tris.ToArray();
             mesh1.triangles = indices.ToArray();
+            mesh1.uv = SurfaceUvs.ToArray();
 
             index = 0;
             tris.Clear();
             indices.Clear();
+            SurfaceUvs.Clear();
+
             foreach (Triangle thing in newTris2)
             {
                 tris.Add(thing.v1);
                 tris.Add(thing.v2);
                 tris.Add(thing.v3);
+                SurfaceUvs.Add(thing.uv1);
+                SurfaceUvs.Add(thing.uv2);
+                SurfaceUvs.Add(thing.uv3);
                 indices.Add(index++);
                 indices.Add(index++);
                 indices.Add(index++);
             }
             mesh2.vertices = tris.ToArray();
             mesh2.triangles = indices.ToArray();
+            mesh2.uv = SurfaceUvs.ToArray();
 
             mesh1.RecalculateNormals();
             mesh1.RecalculateBounds();
@@ -771,13 +815,16 @@ public class SliceableMesh : MonoBehaviour
             transform.position = pos;
             meshF.mesh = mesh1;
             GetComponent<MeshCollider>().sharedMesh = mesh1;
-            GetComponent<MeshRenderer>().materials[1].color = CutplaneColor;
+            //GetComponent<MeshRenderer>().materials[1].color = CutplaneColor;
 
             goNew.transform.position = pos;
             goNew.transform.rotation = rot;
             goNew.GetComponent<MeshFilter>().mesh = mesh2;
             goNew.GetComponent<MeshCollider>().sharedMesh = mesh2;
-            goNew.GetComponent<MeshRenderer>().materials[1].color = CutplaneColor;
+            //goNew.GetComponent<MeshRenderer>().materials[1].color = CutplaneColor;
+
+            Debug.Log("post mesh uv count : " + meshF.mesh.uv.Length);
+            Debug.Log("post mesh vert count : " + meshF.mesh.vertices.Length);
         }
     }
 
@@ -804,6 +851,6 @@ public class SliceableMesh : MonoBehaviour
 
     private Vector2 GetItscPointUV(Vector2 uv_a, Vector2 uv_b, Vector3 pos_a, Vector3 pos_b, Vector3 pos_i)
     {
-        return Vector2.Lerp(uv_a, uv_b, Vector3.Distance(pos_a, pos_i) / Vector3.Distance(pos_a, pos_b)*Vector2.Distance(uv_a,uv_b));
+        return Vector2.Lerp(uv_a, uv_b, Vector3.Distance(pos_a, pos_i) / Vector3.Distance(pos_a, pos_b));
     }
 }
